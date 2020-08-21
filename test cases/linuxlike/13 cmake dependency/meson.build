@@ -53,6 +53,11 @@ depm1 = dependency('SomethingLikeZLIB', required : true, components : 'required_
 depm2 = dependency('SomethingLikeZLIB', required : true, components : 'required_comp',   method : 'cmake', cmake_module_path : ['cmake'])
 depm3 = dependency('SomethingLikeZLIB', required : true, components : ['required_comp'], cmake_module_path : 'cmake')
 
+# Test that a custom CMake module can be found with the incorrect case
+
+depcm1 = dependency('somethinglikezlib', required : true, method : 'cmake', cmake_module_path : 'cmake')
+depcm2 = dependency('SOMEthinglikeZLIB', required : true, method : 'cmake', cmake_module_path : 'cmake')
+
 # Test some edge cases with spaces, etc. (but only for CMake >= 3.15)
 
 if cm_vers.version_compare('>=3.15')

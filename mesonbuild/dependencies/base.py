@@ -1101,10 +1101,11 @@ class CMakeDependency(ExternalDependency):
         cm_path = [x if os.path.isabs(x) else os.path.join(environment.get_source_dir(), x) for x in cm_path]
         if cm_path:
             cm_args.append('-DCMAKE_MODULE_PATH=' + ';'.join(cm_path))
-        if not self._preliminary_find_check(name, cm_path, self.cmakebin.get_cmake_prefix_paths(), environment.machines[self.for_machine]):
+        preliminary_check = self._preliminary_find_check(name, cm_path, self.cmakebin.get_cmake_prefix_paths(), environment.machines[self.for_machine])
+        if not preliminary_check[0]:
             mlog.debug('Preliminary CMake check failed. Aborting.')
             return
-        self._detect_dep(name, modules, components, cm_args)
+        self._detect_dep(preliminary_check[1], modules, components, cm_args)
 
     def __repr__(self):
         s = '<{0} {1}: {2} {3}>'
@@ -1207,7 +1208,7 @@ class CMakeDependency(ExternalDependency):
         except OSError:
             return False
 
-    def _preliminary_find_check(self, name: str, module_path: T.List[str], prefix_path: T.List[str], machine: MachineInfo) -> bool:
+    def _preliminary_find_check(self, name: str, module_path: T.List[str], prefix_path: T.List[str], machine: MachineInfo) -> T.Tuple[bool, str]:
         lname = str(name).lower()
 
         # Checks <path>, <path>/cmake, <path>/CMake
@@ -1220,9 +1221,12 @@ class CMakeDependency(ExternalDependency):
                 content = self._cached_listdir(i)
                 candidates = ['Find{}.cmake', '{}Config.cmake', '{}-config.cmake']
                 candidates = [x.format(name).lower() for x in candidates]
-                if any([x[1] in candidates for x in content]):
-                    return True
-            return False
+                for x in content:
+                    if x[1] in candidates:
+                        if x[1].startswith('find') and x[1].endswith('.cmake'):
+                            return (True, x[0][4:-6])
+                        return (True, name)
+            return (False, '')
 
         # Search in <path>/(lib/<arch>|lib*|share) for cmake files
         def search_lib_dirs(path: str) -> bool:
@@ -1237,7 +1241,7 @@ class CMakeDependency(ExternalDependency):
                     content = list(filter(lambda x: x[1].startswith(lname), content))
                     for k in content:
                         if find_module(os.path.join(cm_dir, k[0])):
-                            return True
+                            return (True, name)
 
                 # <path>/(lib/<arch>|lib*|share)/<name>*/
                 # <path>/(lib/<arch>|lib*|share)/<name>*/(cmake|CMake)/
@@ -1245,48 +1249,59 @@ class CMakeDependency(ExternalDependency):
                 content = list(filter(lambda x: x[1].startswith(lname), content))
                 for k in content:
                     if find_module(os.path.join(i, k[0])):
-                        return True
+                        return (True, name)
 
-            return False
+            return (False, name)
 
         # Check the user provided and system module paths
         for i in module_path + [os.path.join(self.cmakeinfo['cmake_root'], 'Modules')]:
-            if find_module(i):
-                return True
+            result = find_module(i)
+            if result[0]:
+                return result
 
         # Check the user provided prefix paths
         for i in prefix_path:
-            if search_lib_dirs(i):
-                return True
+            result = search_lib_dirs(i)
+            if result[0]:
+                return result
 
         # Check the system paths
         for i in self.cmakeinfo['module_paths']:
-            if find_module(i):
-                return True
+            result = find_module(i)
+            if result[0]:
+                return result
 
-            if search_lib_dirs(i):
-                return True
+            result = search_lib_dirs(i)
+            if result[0]:
+                return result
 
             content = self._cached_listdir(i)
             content = list(filter(lambda x: x[1].startswith(lname), content))
             for k in content:
-                if search_lib_dirs(os.path.join(i, k[0])):
-                    return True
+                result = search_lib_dirs(os.path.join(i, k[0]))
+                if result[0]:
+                    return result
 
             # Mac framework support
             if machine.is_darwin():
                 for j in ['{}.framework', '{}.app']:
                     j = j.format(lname)
                     if j in content:
-                        if find_module(os.path.join(i, j[0], 'Resources')) or find_module(os.path.join(i, j[0], 'Version')):
-                            return True
+                        result = find_module(os.path.join(i, j[0], 'Resources'))
+                        if result[0]:
+                            return result
+                        result = find_module(os.path.join(i, j[0], 'Version'))
+                        if result[0]:
+                            return result
 
         # Check the environment path
         env_path = os.environ.get('{}_DIR'.format(name))
-        if env_path and find_module(env_path):
-            return True
+        if env_path:
+            result = find_module(env_path)
+            if result[0]:
+              return result
 
-        return False
+        return (False, '')
 
     def _detect_dep(self, name: str, modules: T.List[T.Tuple[str, bool]], components: T.List[T.Tuple[str, bool]], args: T.List[str]):
         # Detect a dependency with CMake using the '--find-package' mode
